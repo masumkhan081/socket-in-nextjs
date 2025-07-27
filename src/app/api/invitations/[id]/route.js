@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import connectToDatabase from '@/lib/db';
 import Invitation from '@/models/Invitation';
 import { verifyToken } from '@/lib/auth';
+import { getIO } from '@/lib/socket';
 
 // Middleware to verify authentication
 async function authenticate(request) {
@@ -42,15 +43,33 @@ export async function PUT(request, { params }) {
 
     // Update invitation status
     invitation.status = status;
+    
+    // Set updatedAt when invitation is accepted
+    if (status === 'accepted') {
+      invitation.updatedAt = new Date();
+    }
+    
     await invitation.save();
 
     // Populate sender and recipient information
     await invitation.populate('sender', 'name email');
     await invitation.populate('recipient', 'name email');
 
-    // Note: In a production app, we would emit socket events here
-    // But for this demo, we'll rely on the client polling for updates
-    console.log('Invitation updated:', invitation._id, status);
+    // Emit real-time invitation update event
+    try {
+      const io = getIO();
+      io.emit('invitation_updated', {
+        _id: invitation._id,
+        sender: invitation.sender,
+        recipient: invitation.recipient,
+        status: invitation.status,
+        updatedAt: invitation.updatedAt,
+        updatedBy: invitation.recipient // The person who updated it
+      });
+      console.log('Real-time invitation update event emitted:', invitation._id, status);
+    } catch (socketError) {
+      console.log('Socket not available, invitation update saved to DB only');
+    }
 
     return NextResponse.json({ invitation });
   } catch (error) {

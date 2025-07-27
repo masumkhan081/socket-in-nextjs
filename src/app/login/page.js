@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/contexts/AuthContext';
 import Link from 'next/link';
@@ -13,7 +13,14 @@ export default function Login() {
   const [loginLoading, setLoginLoading] = useState(false);
   const [seedLoading, setSeedLoading] = useState(false);
   const router = useRouter();
-  const { login } = useAuth();
+  const { login, user, loading, isAuthenticated } = useAuth();
+  
+  // Redirect if already authenticated
+  useEffect(() => {
+    if (!loading && isAuthenticated()) {
+      router.push('/dashboard');
+    }
+  }, [user, loading, router, isAuthenticated]);
 
   const handleSeedDatabase = async () => {
     try {
@@ -44,8 +51,25 @@ export default function Login() {
     }
   };
 
+  // Show loading while checking authentication
+  if (loading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gray-50">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-indigo-600 mx-auto"></div>
+          <p className="mt-4 text-gray-600">Loading...</p>
+        </div>
+      </div>
+    );
+  }
+  
+  // Don't render login form if user is authenticated
+  if (isAuthenticated()) {
+    return null;
+  }
+
   return (
-    <div className="min-h-screen   flex items-center justify-center bg-gray-50">
+    <div className="min-h-screen flex items-center justify-center bg-gray-50">
       <div className="w-[500px] space-y-8 p-10 bg-white rounded-xl shadow-md">
         <div className="text-center">
           <h1 className="text-3xl font-bold">Real-time Notification System</h1>
@@ -113,7 +137,7 @@ export default function Login() {
 
         <div className="mt-4 text-sm">
           <h3 className="font-medium text-center mb-2">Demo Users:</h3>
-          <ul className="space-y-2 border rounded-md p-3 bg-gray-50">
+          <ul className="max-h-[200px] overflow-y-scroll space-y-2 border rounded-md p-3 bg-gray-50">
             {demoUsers.map(user => (
               <li key={user.id} className="flex justify-between items-center">
                 <span>{user.email} | {user.password}</span>

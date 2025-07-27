@@ -3,6 +3,7 @@ import connectToDatabase from '@/lib/db';
 import Invitation from '@/models/Invitation';
 import User from '@/models/User';
 import { verifyToken } from '@/lib/auth';
+import { getIO } from '@/lib/socket';
 
 // Middleware to verify authentication
 async function authenticate(request) {
@@ -18,28 +19,49 @@ async function authenticate(request) {
 
 export async function GET(request) {
   try {
-    const user = await authenticate(request);
-    if (!user) {
+    // Get authorization header
+    const authHeader = request.headers.get('authorization');
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
       return NextResponse.json({ error: 'Authentication required' }, { status: 401 });
     }
-
+    
+    // Extract and verify token
+    const token = authHeader.split(' ')[1];
+    const decoded = verifyToken(token);
+    
+    if (!decoded) {
+      return NextResponse.json({ error: 'Invalid token' }, { status: 401 });
+    }
+    
+    // Get query parameters
+    const url = new URL(request.url);
+    const status = url.searchParams.get('status');
+    
     // Connect to the database
     await connectToDatabase();
 
-    // Get invitations for the user (either as sender or recipient)
-    const invitations = await Invitation.find({
+    // Build query
+    const query = {
       $or: [
-        { sender: user.id },
-        { recipient: user.id }
+        { sender: decoded.id },
+        { recipient: decoded.id }
       ]
-    })
-    .populate('sender', 'name email')
-    .populate('recipient', 'name email')
-    .sort({ createdAt: -1 });
+    };
+    
+    // Add status filter if provided
+    if (status) {
+      query.status = status;
+    }
+
+    // Find invitations based on query
+    const invitations = await Invitation.find(query)
+      .populate('sender', 'name email isOnline')
+      .populate('recipient', 'name email isOnline')
+      .sort({ createdAt: -1 });
 
     return NextResponse.json({ invitations });
   } catch (error) {
-    console.error('Get invitations error:', error);
+    console.error('Error fetching invitations:', error);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 }
@@ -83,13 +105,24 @@ export async function POST(request) {
 
     await invitation.save();
 
-    // Populate sender information for the response
+    // Populate the sender and recipient fields
     await invitation.populate('sender', 'name email');
     await invitation.populate('recipient', 'name email');
 
-    // Note: In a production app, we would emit socket events here
-    // But for this demo, we'll rely on the client polling for new invitations
-    console.log('New invitation created:', invitation._id);
+    // Emit real-time invitation event to recipient
+    try {
+      const io = getIO();
+      io.emit('new_invitation', {
+        _id: invitation._id,
+        sender: invitation.sender,
+        recipient: invitation.recipient,
+        status: invitation.status,
+        createdAt: invitation.createdAt
+      });
+      console.log('Real-time invitation event emitted:', invitation._id);
+    } catch (socketError) {
+      console.log('Socket not available, invitation saved to DB only');
+    }
 
     return NextResponse.json({ invitation });
   } catch (error) {
